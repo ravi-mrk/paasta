@@ -34,13 +34,13 @@ from task_processing.runners.sync import Sync
 from task_processing.task_processor import TaskProcessor
 
 from paasta_tools import mesos_tools
-from paasta_tools.cli.cmds.remote_run import add_common_args_to_parser
-from paasta_tools.cli.cmds.remote_run import add_start_args_to_parser
+from paasta_tools.cli.cmds.remote_run import add_action_parsers
 from paasta_tools.cli.utils import figure_out_service_name
 from paasta_tools.frameworks.native_service_config import load_paasta_native_job_config
 from paasta_tools.mesos_tools import get_all_frameworks
 from paasta_tools.mesos_tools import get_mesos_master
 from paasta_tools.utils import compose_job_id
+from paasta_tools.utils import DEFAULT_SOA_DIR
 from paasta_tools.utils import get_code_sha_from_dockerurl
 from paasta_tools.utils import get_config_hash
 from paasta_tools.utils import load_system_paasta_config
@@ -61,33 +61,7 @@ def emit_counter_metric(counter_name, service, instance):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description='')
-    subs = parser.add_subparsers(
-        dest='action',
-        help='Subcommands of paasta_remote_run',
-    )
-
-    start_parser = subs.add_parser('start', help='Start task')
-    add_start_args_to_parser(start_parser)
-    add_common_args_to_parser(start_parser)
-    start_parser.add_argument(
-        '-X', '--constraints-json',
-        help=('Mesos constraints JSON'),
-        required=False,
-        default=None,
-    )
-
-    stop_parser = subs.add_parser('stop', help='Stop task')
-    add_common_args_to_parser(stop_parser)
-    stop_parser.add_argument(
-        '-F', '--framework-id',
-        help=('ID of framework to stop'),
-        required=False,
-        default=None,
-    )
-
-    list_parser = subs.add_parser('list', help='List tasks')
-    add_common_args_to_parser(list_parser)
-
+    add_action_parsers(parser)
     return parser.parse_args(argv)
 
 
@@ -105,7 +79,8 @@ def extract_args(args):
         )
         system_paasta_config = SystemPaastaConfig({"volumes": []}, '/etc/paasta')
 
-    service = figure_out_service_name(args, soa_dir=args.yelpsoa_config_root)
+    soa_dir = DEFAULT_SOA_DIR
+    service = figure_out_service_name(args, soa_dir=soa_dir)
     cluster = args.cluster or system_paasta_config.get_local_run_config().get('default_cluster', None)
 
     if not cluster:
@@ -120,7 +95,6 @@ def extract_args(args):
         emit_counter_metric('paasta.remote_run.' + args.action + '.failed', service, 'UNKNOWN')
         sys.exit(1)
 
-    soa_dir = args.yelpsoa_config_root
     instance = args.instance
     if instance is None:
         instance_type = 'adhoc'
@@ -242,7 +216,6 @@ def build_executor_stack(
     run_id,
     system_paasta_config,
     framework_staging_timeout,
-    region,
 ):
 
     cluster_fqdn = system_paasta_config.get_cluster_fqdn_format().format(cluster=cluster)
@@ -284,9 +257,7 @@ def build_executor_stack(
     else:
         raise ValueError("Required aws credentials")
 
-    if not region:
-        region = taskproc_config.get('aws_region')
-
+    region = taskproc_config.get('aws_region')
     endpoint = taskproc_config.get('dynamodb_endpoint')
     session = Session(
         region_name=region,
@@ -313,7 +284,7 @@ def remote_run_start(args):
         soa_dir, instance, instance_type = extract_args(args)
     overrides_dict = {}
 
-    constraints_json = args.constraints_json
+    constraints_json = args.constraint
     if constraints_json:
         try:
             constraints = json.loads(constraints_json)
@@ -437,7 +408,6 @@ def remote_run_start(args):
             run_id=run_id,
             system_paasta_config=system_paasta_config,
             framework_staging_timeout=args.staging_timeout,
-            region=args.aws_region,
         )
         runner = Sync(executor_stack)
 
